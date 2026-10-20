@@ -69,6 +69,8 @@ if($_SESSION['lang'] == 'en')
   $alleenzaterdagaankomst = 'The chosen apartment is still available, but during this period you can only arrive and depart on Saturdays.';
   $borg = 'borg';
   $totaalprijs = 'totaalprijs';
+  $fout_onvolledig = 'Unfortunately your booking could not be processed: not all required fields were filled in correctly. Please go back and check your details.';
+  $fout_nietbeschikbaar = 'Unfortunately the selected apartment is no longer available for these dates. Please go back and choose other dates.';
 }
 elseif($_SESSION['lang'] == 'de')
 {
@@ -141,6 +143,8 @@ Nutzer von Hotmail, Live Mail oder Outlook Live können unsere Adresse als siche
   $alleenzaterdagaankomst = 'Die gewählte Appartement ist noch frei, aber in dieser Zeitraum können Sie nur samstags an- und abreisen.';
   $borg = 'kaution';
   $totaalprijs = 'totale';
+  $fout_onvolledig = 'Leider konnte Ihre Buchung nicht verarbeitet werden: Nicht alle Pflichtfelder wurden korrekt ausgefüllt. Bitte gehen Sie zurück und überprüfen Sie Ihre Angaben.';
+  $fout_nietbeschikbaar = 'Leider ist das gewählte Apartment für diese Daten nicht mehr verfügbar. Bitte gehen Sie zurück und wählen Sie andere Daten.';
 }
 elseif($_SESSION['lang'] == 'it')
 {
@@ -212,6 +216,8 @@ elseif($_SESSION['lang'] == 'it')
   $alleenzaterdagaankomst = 'L\'appartamento scelto è ancora disponibile, ma durante questo periodo è possibile arrivare e partire solo il sabato.';
   $borg = 'Deposito cauzionale rimborsabile';
   $totaalprijs = 'totale';
+  $fout_onvolledig = 'Purtroppo non è stato possibile elaborare la Sua prenotazione: non tutti i campi obbligatori sono stati compilati correttamente. Torni indietro e controlli i Suoi dati.';
+  $fout_nietbeschikbaar = 'Purtroppo l\'appartamento scelto non è più disponibile per queste date. Torni indietro e scelga altre date.';
 }
 else
 {
@@ -284,5 +290,7 @@ else
   $alleenzaterdagaankomst = 'Het gekozen apparatement is nog vrij, maar in deze periode kunt u alleen op zaterdagen aankomen en vertrekken.';
   $borg = 'borg';
   $totaalprijs = 'totaal';
+  $fout_onvolledig = 'Helaas kon uw boeking niet worden verwerkt: niet alle verplichte velden zijn juist ingevuld. Ga terug en controleer uw gegevens.';
+  $fout_nietbeschikbaar = 'Helaas is het gekozen appartement voor deze data niet meer beschikbaar. Ga terug en kies andere data.';
 }
 ?>

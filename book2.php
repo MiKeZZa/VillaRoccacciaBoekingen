@@ -1,3 +1,16 @@
+<?php
+// Sessie starten voordat er HTML naar de browser gaat, anders werkt de sessie niet
+session_start();
+if(isset($_GET['lang']) && in_array($_GET['lang'], array('nl', 'en', 'de', 'it'))) { $_SESSION['lang'] = $_GET['lang']; } else { $_SESSION['lang'] = 'nl'; }
+
+include('vertalingen.php');
+include ('../wp-config.php');
+$mysqli = mysqli_connect("localhost",DB_USER,DB_PASSWORD, DB_NAME);
+include('./mailen.php');
+
+// Ingevulde gegevens, veilig gemaakt om te tonen in de pagina en de mails
+$veilig = array_map('vr_html', $_POST);
+?>
 <!doctype html>
 <html lang="en">
 <head>
@@ -14,30 +27,69 @@
 <div class="main-content-inner col-sm-12 col-md-8">
 
 <?php
-SESSION_START();
-if($_GET['lang'] <> '') { $_SESSION['lang'] = $_GET['lang']; } else { $_SESSION['lang'] = 'nl'; }
-
-include('vertalingen.php');
-include ('../wp-config.php');
-$mysqli = mysqli_connect("localhost",DB_USER,DB_PASSWORD, DB_NAME);
-include('./mailen.php');
-
-// Ingevulde gegevens, veilig gemaakt om te tonen in de pagina en de mails
-$veilig = array_map('vr_html', $_POST);
+// Controleert of een datum echt bestaat en in de vorm jjjj-mm-dd is
+function vr_geldige_datum($datum)
+{
+	$dt = DateTime::createFromFormat('Y-m-d', $datum);
+	return $dt && $dt->format('Y-m-d') === $datum;
+}
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') 
-{	
+{
+	$aankomst = isset($_POST['aankomstdatum_engels']) ? (string)$_POST['aankomstdatum_engels'] : '';
+	$vertrek = isset($_POST['vertrekdatum_engels']) ? (string)$_POST['vertrekdatum_engels'] : '';
+	$huisid = isset($_POST['huisid']) ? (string)$_POST['huisid'] : '';
+	$email = isset($_POST['email']) ? trim((string)$_POST['email']) : '';
+	$fout = '';
+	$aldoorgegeven = false;
+
+	// Controleren of alles juist is ingevuld
+	if(!vr_geldige_datum($aankomst) || !vr_geldige_datum($vertrek) || $aankomst >= $vertrek || $aankomst < date('Y-m-d')
+		|| $huisid == '' || $veilig['naam'] == '' || !PHPMailer\PHPMailer\PHPMailer::validateAddress($email))
+	{
+		$fout = $fout_onvolledig;
+	}
+	else
+	{
+		// Controleren of het appartement nog vrij is (ook als twee mensen tegelijk boeken)
+		$stmt = $mysqli->prepare("SELECT email, aankomstdatum, vertrekdatum FROM book_bookings
+				WHERE huisid = ? AND status <> 'Geannuleerd' AND aankomstdatum < ? AND vertrekdatum > ?");
+		$stmt->bind_param('sss', $huisid, $vertrek, $aankomst);
+		$stmt->execute();
+		$stmt->bind_result($bestaand_email, $bestaand_aankomst, $bestaand_vertrek);
+		while($stmt->fetch())
+		{
+			// Zelfde boeking nogmaals verstuurd (bijv. pagina vernieuwd): niet dubbel opslaan of mailen
+			if(strcasecmp($bestaand_email, $email) == 0 && $bestaand_aankomst == $aankomst && $bestaand_vertrek == $vertrek)
+			{
+				$aldoorgegeven = true;
+			}
+			else
+			{
+				$fout = $fout_nietbeschikbaar;
+			}
+		}
+		$stmt->close();
+	}
+
+	if($fout <> '')
+	{
+		echo '<p>'.$fout.'</p>
+		<a href="javascript:history.back()">&laquo;</a>';
+	}
+	else
+	{
 	echo '	
 	<h3>'.$boekingingevoerd.'</h3>
 	'.$bedanktvooruwboeking.'<br /><br />';
 	
 	if(strtotime($_POST['aankomstdatum_engels']) < strtotime("+28 day"))
 	{
-		echo $binnen4weken.$veilig['prijs'].' '.$nietbinnen4weken_1.' '.$binnen4weken_2;
+		echo $binnen4weken.$veilig['prijs'].' '.$binnen4weken_2;
 	}
 	else
 	{
-		echo $nietbinnen4weken.$veilig['aanbetaling'].' '.$nietbinnen4weken_1.' '.$nietbinnen4weken_2;
+		echo $nietbinnen4weken.$veilig['aanbetaling'].' '.$nietbinnen4weken_2;
 	}
 
 	echo '<br /><br />
@@ -49,6 +101,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST')
 	'.$bedankt.'<br /><br />
 	
 	<strong>'.$spambox.'</strong>';
+
+	if(!$aldoorgegeven)
+	{
 	// Prepared statement, zodat bijv. een naam als "O'Brien" de boeking niet laat mislukken
 	$stmt = $mysqli->prepare("INSERT INTO book_bookings 
 				(aankomstdatum, vertrekdatum, huisid, naam, email, telefoon, adres, land, aantalpersonen, prijs, aanbetaling, status, lang)
@@ -56,7 +111,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST')
 	$stmt->bind_param('ssssssssssss', $_POST['aankomstdatum_engels'], $_POST['vertrekdatum_engels'], $_POST['huisid'], $_POST['naam'],
 							$_POST['email'], $_POST['telefoon'], $_POST['adres'], $_POST['land'], $_POST['aantalpersonen'],
 							$_POST['prijs'], $_POST['aanbetaling'], $_SESSION['lang']);
-	if(!$stmt->execute())
+	$opgeslagen = $stmt->execute();
+	if(!$opgeslagen)
 	{
 		error_log('Villa Roccaccia boeking: opslaan mislukt: '.$stmt->error);
 	}
@@ -94,8 +150,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST')
 	
 	if(strtotime($_POST['aankomstdatum_engels']) >= strtotime("+28 day"))
 	{
-		$tekstvoorboeker .= $aanbetaling.' € '.$veilig['aanbetaling'].' + '.$aanbetalingborg.'<br />		
-		'.$restantbedrag.' € '.$veilig['restantbedrag'].'<br />'.$eindschoonmaak.'<br />';
+		$tekstvoorboeker .= $aanbetaling.' € '.$veilig['aanbetaling'].(isset($aanbetalingborg) ? ' + '.$aanbetalingborg : '').'<br />		
+		'.$restantbedrag.' € '.$veilig['restantbedrag'].'<br />'.(isset($eindschoonmaak) ? $eindschoonmaak.'<br />' : '');
 	}
 	
 	$tekstvoorboeker .= '<br />
@@ -644,9 +700,13 @@ cellspacing="0" width="100%" class="mcnTextBlock" style="min-width:100%;">
 	$tekstvoorvilla .= '
 	<strong>Uw ingevoerde gegevens:</strong><br />
 	Adres: '.$veilig['adres'].'<br />
-	Plaats: '.$veilig['plaats'].'<br />
 	Land: '.$veilig['land'].'<br />
 	Telefoonnummer: '.$veilig['telefoon'].'<br /><br />';
+
+	if(!$opgeslagen)
+	{
+		$tekstvoorvilla = '<strong>LET OP: deze boeking kon NIET in het boekingssysteem worden opgeslagen!</strong><br /><br />'.$tekstvoorvilla;
+	}
 
 	$htmlvoorvilla = '<!doctype html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -1164,6 +1224,8 @@ cellspacing="0" width="100%" class="mcnTextBlock" style="min-width:100%;">
 </html>';
 
 	vr_verstuur_mail(array('info@villaroccaccia.com'), 'Boeking bij Villa Roccaccia', $htmlvoorvilla, $tekstvoorvilla, $_POST['email'], $_POST['naam']);
+	}
+	}
 }
 ?>
  
