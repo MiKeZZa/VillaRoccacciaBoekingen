@@ -1,3 +1,16 @@
+<?php
+// Sessie starten voordat er HTML naar de browser gaat, anders werkt de sessie niet
+session_start();
+if(isset($_GET['lang']) && in_array($_GET['lang'], array('nl', 'en', 'de', 'it'))) { $_SESSION['lang'] = $_GET['lang']; } else { $_SESSION['lang'] = 'nl'; }
+
+include('vertalingen.php');
+include ('../wp-config.php');
+$mysqli = mysqli_connect("localhost",DB_USER,DB_PASSWORD, DB_NAME);
+include('./mailen.php');
+
+// Ingevulde gegevens, veilig gemaakt om te tonen in de pagina en de mails
+$veilig = array_map('vr_html', $_POST);
+?>
 <!doctype html>
 <html lang="en">
 <head>
@@ -14,27 +27,69 @@
 <div class="main-content-inner col-sm-12 col-md-8">
 
 <?php
-SESSION_START();
-if($_GET['lang'] <> '') { $_SESSION['lang'] = $_GET['lang']; } else { $_SESSION['lang'] = 'nl'; }
-
-include('vertalingen.php');
-include ('../wp-config.php');
-$mysqli = mysqli_connect("localhost",DB_USER,DB_PASSWORD, DB_NAME);
-//include('./mailing.php');
+// Controleert of een datum echt bestaat en in de vorm jjjj-mm-dd is
+function vr_geldige_datum($datum)
+{
+	$dt = DateTime::createFromFormat('Y-m-d', $datum);
+	return $dt && $dt->format('Y-m-d') === $datum;
+}
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') 
-{	
+{
+	$aankomst = isset($_POST['aankomstdatum_engels']) ? (string)$_POST['aankomstdatum_engels'] : '';
+	$vertrek = isset($_POST['vertrekdatum_engels']) ? (string)$_POST['vertrekdatum_engels'] : '';
+	$huisid = isset($_POST['huisid']) ? (string)$_POST['huisid'] : '';
+	$email = isset($_POST['email']) ? trim((string)$_POST['email']) : '';
+	$fout = '';
+	$aldoorgegeven = false;
+
+	// Controleren of alles juist is ingevuld
+	if(!vr_geldige_datum($aankomst) || !vr_geldige_datum($vertrek) || $aankomst >= $vertrek || $aankomst < date('Y-m-d')
+		|| $huisid == '' || $veilig['naam'] == '' || !PHPMailer\PHPMailer\PHPMailer::validateAddress($email))
+	{
+		$fout = $fout_onvolledig;
+	}
+	else
+	{
+		// Controleren of het appartement nog vrij is (ook als twee mensen tegelijk boeken)
+		$stmt = $mysqli->prepare("SELECT email, aankomstdatum, vertrekdatum FROM book_bookings
+				WHERE huisid = ? AND status <> 'Geannuleerd' AND aankomstdatum < ? AND vertrekdatum > ?");
+		$stmt->bind_param('sss', $huisid, $vertrek, $aankomst);
+		$stmt->execute();
+		$stmt->bind_result($bestaand_email, $bestaand_aankomst, $bestaand_vertrek);
+		while($stmt->fetch())
+		{
+			// Zelfde boeking nogmaals verstuurd (bijv. pagina vernieuwd): niet dubbel opslaan of mailen
+			if(strcasecmp($bestaand_email, $email) == 0 && $bestaand_aankomst == $aankomst && $bestaand_vertrek == $vertrek)
+			{
+				$aldoorgegeven = true;
+			}
+			else
+			{
+				$fout = $fout_nietbeschikbaar;
+			}
+		}
+		$stmt->close();
+	}
+
+	if($fout <> '')
+	{
+		echo '<p>'.$fout.'</p>
+		<a href="javascript:history.back()">&laquo;</a>';
+	}
+	else
+	{
 	echo '	
 	<h3>'.$boekingingevoerd.'</h3>
 	'.$bedanktvooruwboeking.'<br /><br />';
 	
 	if(strtotime($_POST['aankomstdatum_engels']) < strtotime("+28 day"))
 	{
-		echo $binnen4weken.$_POST['prijs'].' '.$nietbinnen4weken_1.' '.$binnen4weken_2;
+		echo $binnen4weken.$veilig['prijs'].' '.$binnen4weken_2;
 	}
 	else
 	{
-		echo $nietbinnen4weken.$_POST['aanbetaling'].' '.$nietbinnen4weken_1.' '.$nietbinnen4weken_2;
+		echo $nietbinnen4weken.$veilig['aanbetaling'].' '.$nietbinnen4weken_2;
 	}
 
 	echo '<br /><br />
@@ -46,69 +101,35 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST')
 	'.$bedankt.'<br /><br />
 	
 	<strong>'.$spambox.'</strong>';
-	$query = "INSERT INTO book_bookings 
+
+	if(!$aldoorgegeven)
+	{
+	// Prepared statement, zodat bijv. een naam als "O'Brien" de boeking niet laat mislukken
+	$stmt = $mysqli->prepare("INSERT INTO book_bookings 
 				(aankomstdatum, vertrekdatum, huisid, naam, email, telefoon, adres, land, aantalpersonen, prijs, aanbetaling, status, lang)
-					VALUES ('".$_POST['aankomstdatum_engels']."', '".$_POST['vertrekdatum_engels']."', '".$_POST['huisid']."', '".$_POST['naam']."',
-							'".$_POST['email']."', '".$_POST['telefoon']."', '".$_POST['adres']."', '".$_POST['land']."', '".$_POST['aantalpersonen']."',
-							'".$_POST['prijs']."', '".$_POST['aanbetaling']."', 'Nog niet bevestigd', '".$_SESSION['lang']."')";
-	$result = $mysqli->query($query);
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Nog niet bevestigd', ?)");
+	$stmt->bind_param('ssssssssssss', $_POST['aankomstdatum_engels'], $_POST['vertrekdatum_engels'], $_POST['huisid'], $_POST['naam'],
+							$_POST['email'], $_POST['telefoon'], $_POST['adres'], $_POST['land'], $_POST['aantalpersonen'],
+							$_POST['prijs'], $_POST['aanbetaling'], $_SESSION['lang']);
+	$opgeslagen = $stmt->execute();
+	if(!$opgeslagen)
+	{
+		error_log('Villa Roccaccia boeking: opslaan mislukt: '.$stmt->error);
+	}
+	$stmt->close();
 
-	// Include de class t.b.v. mailen van bevestiging
-	include("./phpmailer/class.phpmailer.php");
-
-	//mailen aan boeker							
-	// Maak een instantie van het object aan
-	$mail = new PHPMailer(true);
-	$mail->CharSet = 'UTF-8';
-	
-	$mail->IsSMTP();
-	$mail->Host = "mail.villaroccaccia.com";
-
-	// used only when SMTP requires authentication  
-	$mail->SMTPAuth = true;
-	$mail->Username = 'mailactie@villaroccaccia.com';
-	$mail->Password = 'ywsXrLE3Em';
-	
-	//tegen de spam
-	$mail->AddReplyTo( 'info@villaroccaccia.com', 'Villa Roccaccia' );
-	$mail->ReturnPath='info@villaroccaccia.com';
-	$mail->HeaderLine("Organization" , SITE); 
-	$mail->HeaderLine("Content-Transfer-encoding" , "8bit");
-	$mail->HeaderLine("Message-ID" , "<".md5(uniqid(time()))."@{$_SERVER['SERVER_NAME']}>");
-	$mail->HeaderLine("X-MSmail-Priority" , "Normal");
-	$mail->HeaderLine("X-Mailer" , "Microsoft Office Outlook, Build 11.0.5510");
-	$mail->HeaderLine("X-MimeOLE" , "Produced By Microsoft MimeOLE V6.00.2800.1441");
-	$mail->HeaderLine("X-Sender" , $mail->Sender);
-	$mail->HeaderLine("X-AntiAbuse" , "This is a solicited email for - ".SITE." mailing list.");
-	$mail->HeaderLine("X-AntiAbuse" , "Servername - {$_SERVER['SERVER_NAME']}");
-	$mail->HeaderLine("X-AntiAbuse" , $mail->Sender);
-	$mail->Encoding = 'base64';
-
-	// Geef aan dat het een HTML mail betreft
-	$mail->IsHTML(true);
-					 
-	// Geef de afzender aan
-	$mail->From = "info@villaroccaccia.com";
-	$mail->FromName = "Villa Roccaccia";
-							   
-	// Bepaal de geadresseerden
-	$mail->ClearAllRecipients();
-	$mail->AddAddress($_POST['email']); // Eerste geadresseerde
-	$mail->AddAddress('villaroccaccia@gmail.com'); // Tweede geadresseerde
-					
+	//mailen aan boeker
 	$onderwerp = $boekingbij.' Villa Roccaccia';
-	// Inhoud van de mail
-	$mail->Subject = $onderwerp;
 
-	$tekstvoorboeker = $beste.' '.$_POST['naam'].',<br /><br />';
+	$tekstvoorboeker = $beste.' '.$veilig['naam'].',<br /><br />';
 	
 	if(strtotime($_POST['aankomstdatum_engels']) < strtotime("+28 day"))
 	{
-		$tekstvoorboeker .= $binnen4weken.$_POST['prijs'].' '.$binnen4weken_2;
+		$tekstvoorboeker .= $binnen4weken.$veilig['prijs'].' '.$binnen4weken_2;
 	}
 	else
 	{
-		$tekstvoorboeker .= $nietbinnen4weken.$_POST['aanbetaling'].' '.$nietbinnen4weken_2;
+		$tekstvoorboeker .= $nietbinnen4weken.$veilig['aanbetaling'].' '.$nietbinnen4weken_2;
 	}
 	
 	$tekstvoorboeker .= '<br /><br />
@@ -118,33 +139,32 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST')
 	'.$ondervermelding.'<br /><br />                                                                                                                                                       
 	'.$vragen.'<br /><br />
 
-	'.ucfirst($appartement).': '.$_POST['huis'].'<br />
-	'.ucfirst($aankomstdatum).': '.$_POST['aankomstdatum'].'<br />
-	'.ucfirst($vertrekdatum).': '.$_POST['vertrekdatum'].'<br />
-	'.ucfirst($aantaldagen_).': '.$_POST['aantaldagen'].'<br />
-	'.ucfirst($aantalpersonen).': '.$_POST['aantalpersonen'].'<br />
-	'.ucfirst($prijs_).' € '.$_POST['prijszonderborg'].'<br />
+	'.ucfirst($appartement).': '.$veilig['huis'].'<br />
+	'.ucfirst($aankomstdatum).': '.$veilig['aankomstdatum'].'<br />
+	'.ucfirst($vertrekdatum).': '.$veilig['vertrekdatum'].'<br />
+	'.ucfirst($aantaldagen_).': '.$veilig['aantaldagen'].'<br />
+	'.ucfirst($aantalpersonen).': '.$veilig['aantalpersonen'].'<br />
+	'.ucfirst($prijs_).' € '.$veilig['prijszonderborg'].'<br />
 	'.ucfirst($borg).' € '.number_format((float)$_POST['borgbedrag'], 2, '.', '').'<br />
-	'.ucfirst($totaalprijs).' € '.$_POST['totaalprijsinclborg'].'<br /><br />';
+	'.ucfirst($totaalprijs).' € '.$veilig['totaalprijsinclborg'].'<br /><br />';
 	
 	if(strtotime($_POST['aankomstdatum_engels']) >= strtotime("+28 day"))
 	{
-		$tekstvoorboeker .= $aanbetaling.' € '.$_POST['aanbetaling'].' + '.$aanbetalingborg.'<br />		
-		'.$restantbedrag.' € '.$_POST['restantbedrag'].'<br />'.$eindschoonmaak.'<br />';
+		$tekstvoorboeker .= $aanbetaling.' € '.$veilig['aanbetaling'].(isset($aanbetalingborg) ? ' + '.$aanbetalingborg : '').'<br />		
+		'.$restantbedrag.' € '.$veilig['restantbedrag'].'<br />'.(isset($eindschoonmaak) ? $eindschoonmaak.'<br />' : '');
 	}
 	
 	$tekstvoorboeker .= '<br />
 	<strong>'.ucfirst($uwgegevens).':</strong><br />
-	'.ucfirst($adres).': '.$_POST['adres'].'<br />
-	'.ucfirst($land).': '.$_POST['land'].'<br />
-	'.ucfirst($telefoonnummer).': '.$_POST['telefoon'].'<br />
+	'.ucfirst($adres).': '.$veilig['adres'].'<br />
+	'.ucfirst($land).': '.$veilig['land'].'<br />
+	'.ucfirst($telefoonnummer).': '.$veilig['telefoon'].'<br />
 
 	'.$bedankt.'
 	<br /><br />
 	<strong>'.$spambox.'</strong>';
 	
-	//$mail->Body = $tekstvoorboeker;
-	$mail->Body = '<!doctype html>
+	$htmlvoorboeker = '<!doctype html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
     <head>
     	<!-- NAME: FLYER -->
@@ -659,68 +679,36 @@ cellspacing="0" width="100%" class="mcnTextBlock" style="min-width:100%;">
     </body>
 </html>';
 	
-	// Maximaal aantal karakters
-	$mail->WordWrap = 20000000;
-								
-	// Probeer de mail te versturen
-	//$mail->Send();
+	vr_verstuur_mail(array($_POST['email'], 'villaroccaccia@gmail.com'), $onderwerp, $htmlvoorboeker, $tekstvoorboeker);
 
-	if($mail->send()) {
-		//echo 'Message has been sent';
-	} else {
-		//echo 'Message could not be sent.';
-		//echo 'Mailer Error: ' . $mail->ErrorInfo;
-	}
+	//mailen aan villa roccaccia
+	// Afzender is ons eigen adres; met "beantwoorden" ga je direct naar de klant
+	$tekstvoorvilla = 'Er is een boeking ontvangen van '.$veilig['naam'].'<br /><br />
 
-	//mailen aan villa roccaccia							
-	// Maak een instantie van het object aan
-	$mail = new PHPMailer();
-		
-	// Geef aan dat het een HTML mail betreft
-	$mail->IsHTML(true);
-	
-	$mail->IsSMTP();
-	$mail->Host = "mail.villaroccaccia.com";
-
-	// used only when SMTP requires authentication  
-	$mail->SMTPAuth = true;
-	$mail->Username = 'mailactie@villaroccaccia.com';
-	$mail->Password = 'ywsXrLE3Em';
-					 
-	// Geef de afzender aan
-	$mail->From = $_POST['email'];
-	$mail->FromName = $_POST['naam'];
-							   
-	// Bepaal de geadresseerden
-	$mail->ClearAllRecipients();
-	$mail->AddAddress("info@villaroccaccia.com"); // Eerste geadresseerde
-								
-	// Inhoud van de mail
-	$mail->Subject = 'Boeking bij Villa Roccaccia';
-
-	$tekstvoorvilla = 'Er is een boeking ontvangen van '.$_POST['naam'].'<br /><br />
-
-	Appartement: '.$_POST['huis'].'<br />
-	Aankomst: '.$_POST['aankomstdatum'].'<br />
-	Vertrek: '.$_POST['vertrekdatum'].'<br />
-	Aantal dagen: '.$_POST['aantaldagen'].'<br />
-	Aantal personen: '.$_POST['aantalpersonen'].'<br />
-	Prijs € '.$_POST['prijs'].'<br /><br />';
+	Appartement: '.$veilig['huis'].'<br />
+	Aankomst: '.$veilig['aankomstdatum'].'<br />
+	Vertrek: '.$veilig['vertrekdatum'].'<br />
+	Aantal dagen: '.$veilig['aantaldagen'].'<br />
+	Aantal personen: '.$veilig['aantalpersonen'].'<br />
+	Prijs € '.$veilig['prijs'].'<br /><br />';
 	
 	if(strtotime($_POST['aankomstdatum_engels']) >= strtotime("+28 day"))
 	{
-		$tekstvoorvilla .= 'Aanbetaling € '.$_POST['aanbetaling'].'<br />Restantbedrag € '.$_POST['restantbedrag'].'<br /><br />';
+		$tekstvoorvilla .= 'Aanbetaling € '.$veilig['aanbetaling'].'<br />Restantbedrag € '.$veilig['restantbedrag'].'<br /><br />';
 	}
 	
 	$tekstvoorvilla .= '
 	<strong>Uw ingevoerde gegevens:</strong><br />
-	Adres: '.$_POST['adres'].'<br />
-	Plaats: '.$_POST['plaats'].'<br />
-	Land: '.$_POST['land'].'<br />
-	Telefoonnummer: '.$_POST['telefoon'].'<br /><br />';
+	Adres: '.$veilig['adres'].'<br />
+	Land: '.$veilig['land'].'<br />
+	Telefoonnummer: '.$veilig['telefoon'].'<br /><br />';
 
-	//$mail->Body = $tekstvoorvilla;
-	$mail->Body = '<!doctype html>
+	if(!$opgeslagen)
+	{
+		$tekstvoorvilla = '<strong>LET OP: deze boeking kon NIET in het boekingssysteem worden opgeslagen!</strong><br /><br />'.$tekstvoorvilla;
+	}
+
+	$htmlvoorvilla = '<!doctype html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
     <head>
     	<!-- NAME: FLYER -->
@@ -1235,16 +1223,8 @@ cellspacing="0" width="100%" class="mcnTextBlock" style="min-width:100%;">
     </body>
 </html>';
 
-	// Maximaal aantal karakters
-	$mail->WordWrap = 20000;
-								
-	// Probeer de mail te versturen
-	if($mail->send()) {
-		//echo 'Message has been sent';
-	} else {
-		
-		//echo 'Message could not be sent.';
-		//echo 'Mailer Error: ' . $mail->ErrorInfo;
+	vr_verstuur_mail(array('info@villaroccaccia.com'), 'Boeking bij Villa Roccaccia', $htmlvoorvilla, $tekstvoorvilla, $_POST['email'], $_POST['naam']);
+	}
 	}
 }
 ?>

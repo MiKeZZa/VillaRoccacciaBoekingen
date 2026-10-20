@@ -29,46 +29,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST')
 		$_SESSION['lang'] = $boeking_res['lang'];
 		include('../vertalingen.php');
 		
-		// Include de class t.b.v. mailen van bevestiging
-		include("../phpmailer/class.phpmailer.php");
+		include('../mailen.php');
 
-		//mailen aan boeker							
-		// Maak een instantie van het object aan
-		$mail = new PHPMailer(true);
-		$mail->CharSet = 'UTF-8';
-		
-		$mail->IsSMTP();
-		$mail->Host = "mail.villaroccaccia.com";
-
-		// used only when SMTP requires authentication  
-		$mail->SMTPAuth = true;
-		$mail->Username = 'mailactie@villaroccaccia.com';
-		$mail->Password = 'ywsXrLE3Em';
-
-		// Geef aan dat het een HTML mail betreft
-		$mail->IsHTML(true);
-						 
-		// Geef de afzender aan
-		$mail->From = "info@villaroccaccia.com";
-		$mail->FromName = "Villa Roccaccia";
-								   
-		// Bepaal de geadresseerden
-		$mail->ClearAllRecipients();
-		$mail->AddAddress($boeking_res['email']); // Eerste geadresseerde
-		$mail->AddAddress('villaroccaccia@gmail.com'); // Tweede geadresseerde
-									
+		//mailen aan boeker
 		$onderwerp = $onderwerp_aanbetaling;
 		
-		// Inhoud van de mail
-		$mail->Subject = $onderwerp;
-		
-		$tekstvoorboeker = $beste.' '.$boeking_res['naam'].',<br /><br />
+		$tekstvoorboeker = $beste.' '.vr_html($boeking_res['naam']).',<br /><br />
 		'.$aanbetalingontvangen.'<br /><br />
 		<strong>'.$uwreservering.':</strong><br />
-		'.ucfirst($appartement).': '.$boeking_res['huis'].'<br />
-		'.ucfirst($aantalpersonen).': '.$boeking_res['aantalpersonen'].'<br />
-		'.ucfirst($aankomstdatum).': '.$boeking_res['aankomstdatum'].', '.$na.' 16.00<br />
-		'.ucfirst($vertrekdatum).': '.$boeking_res['vertrekdatum'].', '.$voor.' 10.00<br />
+		'.ucfirst($appartement).': '.vr_html($boeking_res['huis']).'<br />
+		'.ucfirst($aantalpersonen).': '.vr_html($boeking_res['aantalpersonen']).'<br />
+		'.ucfirst($aankomstdatum).': '.vr_html($boeking_res['aankomstdatum']).', '.$na.' 16.00<br />
+		'.ucfirst($vertrekdatum).': '.vr_html($boeking_res['vertrekdatum']).', '.$voor.' 10.00<br />
 		'.$afwijkendetijd.'<br /><br />
 		'.$aanvullendekosten.'<br /><br />
 		'.$doorzwitserland.'<br /><br />
@@ -76,22 +48,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST')
 		'.$hartelijkegroet.',<br />
 		Villa Roccaccia<br /><br />'.$spambox;
 		
-		//tegen de spam
-		$mail->AddReplyTo( 'info@villaroccaccia.com', 'Villa Roccaccia' );
-		$mail->ReturnPath='info@villaroccaccia.com';
-		$mail->HeaderLine("Organization" , SITE); 
-		$mail->HeaderLine("Content-Transfer-encoding" , "8bit");
-		$mail->HeaderLine("Message-ID" , "<".md5(uniqid(time()))."@{$_SERVER['SERVER_NAME']}>");
-		$mail->HeaderLine("X-MSmail-Priority" , "Normal");
-		$mail->HeaderLine("X-Mailer" , "Microsoft Office Outlook, Build 11.0.5510");
-		$mail->HeaderLine("X-MimeOLE" , "Produced By Microsoft MimeOLE V6.00.2800.1441");
-		$mail->HeaderLine("X-Sender" , $mail->Sender);
-		$mail->HeaderLine("X-AntiAbuse" , "This is a solicited email for - ".SITE." mailing list.");
-		$mail->HeaderLine("X-AntiAbuse" , "Servername - {$_SERVER['SERVER_NAME']}");
-		$mail->HeaderLine("X-AntiAbuse" , $mail->Sender);
-		$mail->AltBody = $tekstvoorboeker;
-
-		$mail->Body = '<!doctype html>
+		$htmlvoorboeker = '<!doctype html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
     <head>
     	<!-- NAME: FLYER -->
@@ -606,14 +563,10 @@ cellspacing="0" width="100%" class="mcnTextBlock" style="min-width:100%;">
     </body>
 </html>';
 
-		// Maximaal aantal karakters
-		$mail->WordWrap = 20000000;
-
-		if($mail->send()) {
+		if(vr_verstuur_mail(array($boeking_res['email'], 'villaroccaccia@gmail.com'), $onderwerp, $htmlvoorboeker, $tekstvoorboeker)) {
 			echo 'Mail verstuurd naar de klant';
 		} else {
-			
-			//echo 'Mailer Error: ' . $mail->ErrorInfo;
+			echo 'Mail kon niet worden verstuurd. Zie de PHP error log van de website voor de oorzaak.';
 		}
 	}
 }
