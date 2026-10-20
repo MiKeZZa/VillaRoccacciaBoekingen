@@ -1,0 +1,52 @@
+.undefined a {
+    color: #00FF00 !important;
+	cursor: default;
+}
+
+.ui-state-disabled span
+{
+	color: #FF0000 !important;
+}
+
+
+.ui-state-default
+{
+	cursor: default;
+}
+
+.matched a {
+    color: #00FF00 !important;
+}
+
+.popupbox {
+    position: absolute;
+    top: 50%;
+    z-index: 10000;
+    background-color: red;
+    padding: 50px;
+    right: 50%;
+display: none;
+}
+
+.closepopup {
+    position: absolute;
+    right: 10px;
+    top: 10px;
+}
+
+td.matched.ui-state-disabled {
+pointer-events: auto !important;
+}
+
+html, body {
+    background: transparent !important;
+}
+
+body > div {
+    background: transparent !important;
+}
+
+
+.ui-widget.ui-widget-content {
+	background-color: white !important;
+}
